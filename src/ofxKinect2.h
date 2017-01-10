@@ -24,6 +24,8 @@ namespace ofxKinect2
 
 	class Body;
 	class BodyStream;
+
+	class Face;
 	
 	class Recorder;
 
@@ -332,6 +334,218 @@ protected:
 	void setPixels(Frame frame);
 };
 
+class ofxKinect2::Face
+{
+	friend class Body;
+
+	IFaceFrameSource *p_face_frame_source;
+	IFaceFrameReader *p_face_frame_reader;
+	ofRectangle _faceRectInColorSpace;
+	DetectionResult p_face_properties[FaceProperty::FaceProperty_Count];
+	vector<ofVec2f> p_face_points_in_color_space;
+
+	bool is_tracked;
+public:
+
+	Face() : is_tracked(false), p_face_points_in_color_space(FacePointType::FacePointType_Count) {};
+
+	DetectionResult isHappy()
+	{
+		return p_face_properties[FaceProperty_Happy];
+	}
+
+	DetectionResult isEngaged()
+	{
+		return p_face_properties[FaceProperty_Engaged];
+	}
+
+	DetectionResult isWearingGlasses()
+	{
+		return p_face_properties[FaceProperty_WearingGlasses];
+	}
+
+	DetectionResult isLeftEyeClosed()
+	{
+		return p_face_properties[FaceProperty_LeftEyeClosed];
+	}
+
+	DetectionResult isRightEyeClosed()
+	{
+		return p_face_properties[FaceProperty_RightEyeClosed];
+	}
+
+	DetectionResult isMouthOpen()
+	{
+		return p_face_properties[FaceProperty_MouthOpen];
+	}
+
+	DetectionResult isMouthMoved()
+	{
+		return p_face_properties[FaceProperty_MouthMoved];
+	}
+
+	DetectionResult isLookingAway()
+	{
+		return p_face_properties[FaceProperty_LookingAway];
+	}
+
+	vector<ofVec2f> getFacePointsInColorSpace()
+	{
+		return p_face_points_in_color_space;
+	}
+
+	void setup(ofxKinect2::Device& device)
+	{
+		static const DWORD c_FaceFrameFeatures =
+			FaceFrameFeatures::FaceFrameFeatures_BoundingBoxInColorSpace
+			| FaceFrameFeatures::FaceFrameFeatures_PointsInColorSpace
+			| FaceFrameFeatures::FaceFrameFeatures_RotationOrientation
+			| FaceFrameFeatures::FaceFrameFeatures_Happy
+			| FaceFrameFeatures::FaceFrameFeatures_RightEyeClosed
+			| FaceFrameFeatures::FaceFrameFeatures_LeftEyeClosed
+			| FaceFrameFeatures::FaceFrameFeatures_MouthOpen
+			| FaceFrameFeatures::FaceFrameFeatures_MouthMoved
+			| FaceFrameFeatures::FaceFrameFeatures_LookingAway
+			| FaceFrameFeatures::FaceFrameFeatures_Glasses
+			| FaceFrameFeatures::FaceFrameFeatures_FaceEngagement;
+
+		HRESULT hr = CreateFaceFrameSource(device.get().kinect2, 0, c_FaceFrameFeatures, &p_face_frame_source);
+
+		if (SUCCEEDED(hr))
+		{
+			hr = p_face_frame_source->OpenReader(&p_face_frame_reader);
+
+			if (SUCCEEDED(hr))
+			{
+				ofLog() << "succeded creating face frame reader" << endl;
+			}
+		}
+	}
+
+	inline bool isTracked() const { return is_tracked; }
+
+	ofRectangle &getBoundingBox()
+	{
+		return _faceRectInColorSpace;
+	}
+
+	void update(UINT64 trackingId)
+	{
+		IFaceFrame* pFaceFrame = nullptr;
+		p_face_frame_source->put_TrackingId(trackingId);
+		HRESULT hr = p_face_frame_reader->AcquireLatestFrame(&pFaceFrame);
+
+
+		BOOLEAN bFaceTracked = false;
+		if (SUCCEEDED(hr) && nullptr != pFaceFrame)
+		{
+			hr = pFaceFrame->get_IsTrackingIdValid(&bFaceTracked);
+		}
+
+		if (hr != E_PENDING)
+		{
+			is_tracked = bFaceTracked;
+		}
+		else
+		{
+			ofLog() << "pending" << endl;
+		}
+
+
+		if (SUCCEEDED(hr))
+		{
+			if (bFaceTracked)
+			{
+				IFaceFrameResult* pFaceFrameResult = nullptr;
+				RectI faceBox = { 0 };
+				PointF facePoints[FacePointType::FacePointType_Count];
+				Vector4 faceRotation;
+
+				hr = pFaceFrame->get_FaceFrameResult(&pFaceFrameResult);
+
+				// need to verify if pFaceFrameResult contains data before trying to access it
+				if (SUCCEEDED(hr) && pFaceFrameResult != nullptr)
+				{
+					hr = pFaceFrameResult->get_FaceBoundingBoxInColorSpace(&faceBox);
+
+					if (SUCCEEDED(hr))
+					{
+						_faceRectInColorSpace.x = faceBox.Left;
+						_faceRectInColorSpace.y = faceBox.Top;
+						_faceRectInColorSpace.width = faceBox.Right - faceBox.Left;
+						_faceRectInColorSpace.height = faceBox.Bottom - faceBox.Top;
+						hr = pFaceFrameResult->GetFacePointsInColorSpace(FacePointType::FacePointType_Count, facePoints);
+						
+						if (_faceRectInColorSpace.width > 0.0f && _faceRectInColorSpace.height > 0.0f)
+						{
+							is_tracked = true;
+						}
+						else
+						{
+							is_tracked = false;
+						}
+
+						int num = FacePointType::FacePointType_Count;
+						if (SUCCEEDED(hr))
+						{
+							for (int i = 0; i < num; i++)
+							{
+								ofVec2f v(facePoints[i].X, facePoints[i].Y);
+								p_face_points_in_color_space[i] = v;
+							}
+						}
+					}
+					else
+					{
+						is_tracked = false;
+					}
+
+					if (SUCCEEDED(hr))
+					{
+						hr = pFaceFrameResult->get_FaceRotationQuaternion(&faceRotation);
+					}
+
+					if (SUCCEEDED(hr))
+					{
+						hr = pFaceFrameResult->GetFaceProperties(FaceProperty::FaceProperty_Count, p_face_properties);
+						//faceProperties[FaceProperty_Happy];
+					}
+					
+					if (SUCCEEDED(hr))
+					{
+						// draw face frame results
+						//m_pDrawDataStreams->DrawFaceFrameResults(iFace, &faceBox, facePoints, &faceRotation, faceProperties, &faceTextLayout);
+					}
+				}
+
+				if (pFaceFrameResult != nullptr)
+				{
+					pFaceFrameResult->Release();
+					pFaceFrameResult = nullptr;
+				}
+
+				//SafeRelease(pFaceFrameResult);
+			}
+			else
+			{
+				hr = p_face_frame_source->put_TrackingId(trackingId);
+			}
+		}
+
+		if (is_tracked)
+		{
+			ofLog() << "is tracked: true" << endl;
+		}
+		else
+		{
+			ofLog() << "is tracked: false" << endl;
+		}
+		
+			 
+		//SafeRelease(pFaceFrame);
+	}
+};
+
 class ofxKinect2::Body
 {
 	friend class BodyStream;
@@ -343,9 +557,15 @@ public:
 		joint_points.resize(JointType_Count);
 	}
 
-	void setup(ofxKinect2::Device& device)
+	void setup(ofxKinect2::Device& device, bool track_face = false)
 	{
 		this->device = &device;
+		this->track_face = track_face;
+
+		if (track_face)
+		{
+			face.setup(device);
+		}
 	}
 
 	void close();
@@ -357,6 +577,12 @@ public:
 	void drawHandLeft(int x = 0, int y = 0, int w = ofGetWidth(), int h = ofGetHeight());
 	void drawHandRight(int x = 0, int y = 0, int w = ofGetWidth(), int h = ofGetHeight());
 	void drawLean(int x = 0, int y = 0, int w = ofGetWidth(), int h = ofGetHeight());
+
+	Face &getFace()
+	{
+		return face;
+	}
+
 
 	void setId(UINT64 _id) { id = _id; }
 	inline int getId() const { return id;}
@@ -388,6 +614,9 @@ private:
 	HandState left_hand_state;
 	HandState right_hand_state;
 
+	bool track_face;
+	Face face;
+
 	ofPoint jointToScreen(const JointType jointType, int x = 0, int y = 0, int w = ofGetWidth(), int h = ofGetHeight());
 	ofPoint bodyPointToScreen(const CameraSpacePoint& bodyPoint, int x = 0, int y = 0, int w = ofGetWidth(), int h = ofGetHeight());
 };
@@ -398,12 +627,12 @@ public:
 	BodyStream() : Stream() {}
 	~BodyStream() {}
 
-	bool setup(ofxKinect2::Device& device)
+	bool setup(ofxKinect2::Device& device, bool track_faces = false)
 	{
 		for(int i = 0; i < BODY_COUNT; i++)
 		{
 			Body body;
-			body.setup(device);
+			body.setup(device, track_faces);
 			bodies.push_back(body);
 		}
 		return Stream::setup(device, SENSOR_BODY);

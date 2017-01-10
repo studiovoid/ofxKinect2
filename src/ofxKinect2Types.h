@@ -5,6 +5,7 @@
 
 #include "ofxKinect2Enums.h"
 #include "Kinect.h"
+#include "Kinect.Face.h"
 
 namespace ofxKinect2 {
 #define MAX_STR 256

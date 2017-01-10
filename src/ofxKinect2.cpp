@@ -1181,6 +1181,15 @@ void Body::update(IBody* body)
 	{
 		is_update_scale = false;
 	}
+
+	if (track_face && is_tracked)
+	{
+		face.update(id);
+	}
+	else
+	{
+		face.is_tracked = false;
+	}
 }
 
 //----------------------------------------------------------
